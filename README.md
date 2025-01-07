@@ -170,3 +170,5 @@ You can now interact with the application, send requests to the API, and view th
 ## Conclusion
 
 This guide provides the basic steps to set up and run both the backend and frontend of your project. If you run into any issues, make sure the dependencies are installed properly and the environment variables are correctly set up.
+
+we found venkatesh iyer a man from banglore working on this we have collaborated with him
