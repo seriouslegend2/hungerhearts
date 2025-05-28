@@ -5,6 +5,11 @@ import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import "dotenv/config";
+import fs from "fs";
+import morgan from "morgan";
+import { createStream } from "rotating-file-stream";
+import swaggerUi from "swagger-ui-express";
+import swaggerSpec from "./config/swagger.js";
 
 import { fileURLToPath } from "url";
 import { connectDB } from "./db/connectDB.js";
@@ -24,37 +29,134 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-app.use(cors({ origin: "http://localhost:3000", credentials: true }));
+// Enable CORS with credentials
+const allowedOrigins = [
+    "https://frontend-delta-eight-38.vercel.app",
+    "https://frontend-e7abrx4i9-abhiramkothagundus-projects.vercel.app",
+    "http://localhost:3000",
+];
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.use(
+    cors({
+        origin: allowedOrigins,
+        credentials: true,
+        exposedHeaders: ["Set-Cookie"],
+    })
+);
+
+// Parse cookies
 app.use(cookieParser());
 
+// Parse JSON bodies
+app.use(express.json());
+
+// Connect to database
 connectDB();
 
+// Set EJS as view engine
 app.set("view engine", "ejs");
 app.use(express.static(path.join(__dirname, "public")));
 
-app.get("/", (req, res) => {
-  res.render("whoru");
+// Ensure log directory exists at startup
+const logBaseDir = path.join(__dirname, "log");
+if (!fs.existsSync(logBaseDir)) {
+    fs.mkdirSync(logBaseDir, { recursive: true });
+    console.log("Created log directory:", logBaseDir);
+}
+
+// Logging middleware
+const allLogsStream = createStream(
+    () => {
+        const date = new Date();
+        const day = String(date.getDate()).padStart(2, "0");
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const year = date.getFullYear();
+        const hours = String(date.getHours()).padStart(2, "0");
+        return `all_access.log`;
+    },
+    {
+        interval: "6h", // rotate every 6 hours
+        path: path.join(__dirname, "log"),
+    }
+);
+app.use(morgan("combined", { stream: allLogsStream }));
+
+// Ensure directories exist for delivery and donation logs
+const ensureLogDir = (dir) => {
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+};
+ensureLogDir(path.join(__dirname, "log/delivery"));
+ensureLogDir(path.join(__dirname, "log/donation"));
+
+// Ensure directories exist for user-specific logs
+ensureLogDir(path.join(__dirname, "log/user"));
+ensureLogDir(path.join(__dirname, "log/donor"));
+ensureLogDir(path.join(__dirname, "log/deliveryboy"));
+
+// Utility function for logging
+const logEvent = (type, username, message) => {
+    const logFilePath = path.join(__dirname, `log/${type}/${username}.log`);
+    const timestamp = new Date().toISOString();
+    const logMessage = `[${timestamp}] ${message}\n`;
+
+    fs.appendFile(logFilePath, logMessage, (err) => {
+        if (err) console.error(`Error writing to ${type} log:`, err);
+    });
+};
+
+// Attach logEvent to the request object
+app.use((req, res, next) => {
+    req.logEvent = logEvent;
+    next();
 });
 
-app.get("/u_login", (req, res) => {
-  res.render("login_signup");
-});
+// Delivery logs
+const deliveryLogStream = createStream(
+    () => {
+        const date = new Date();
+        const day = String(date.getDate()).padStart(2, "0");
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const year = date.getFullYear();
+        const hours = String(date.getHours()).padStart(2, "0");
+        return `delivery_access.log`;
+    },
+    {
+        interval: "6h",
+        path: path.join(__dirname, "log/delivery"),
+    }
+);
+app.use("/delivery", morgan("combined", { stream: deliveryLogStream }));
 
-app.get("/d_login", (req, res) => {
-  res.render("login_signup_donor");
-});
+// Donation logs
+const donationLogStream = createStream(
+    () => {
+        const date = new Date();
+        const day = String(date.getDate()).padStart(2, "0");
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const year = date.getFullYear();
+        const hours = String(date.getHours()).padStart(2, "0");
+        return `donation_access.log`;
+    },
+    {
+        interval: "6h",
+        path: path.join(__dirname, "log/donation"),
+    }
+);
+app.use("/donation", morgan("combined", { stream: donationLogStream }));
 
-app.get("/del_login", (req, res) => {
-  res.render("login_signup_deliveryboy");
-});
+// Swagger UI route
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-app.get("/admin", (req, res) => {
-  res.render("login_admin");
-});
+// Public Routes
+app.get("/", (req, res) => res.render("whoru"));
+app.get("/u_login", (req, res) => res.render("login_signup"));
+app.get("/d_login", (req, res) => res.render("login_signup_donor"));
+app.get("/del_login", (req, res) => res.render("login_signup_deliveryboy"));
+app.get("/admin", (req, res) => res.render("login_admin"));
 
+// API Routes
 app.use("/admin", adminRoutes);
 app.use("/auth", authRoutes);
 app.use("/user", userRoutes);
@@ -65,7 +167,12 @@ app.use("/deliveryboy", deliveryboyRoutes);
 app.use("/order", orderRoutes);
 app.use("/slum", slumRoutes);
 
+// Start Server
 const PORT = process.env.PORT || 9500;
-app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== "test") {
+    app.listen(PORT, () => {
+        console.log(`Server is running on http://localhost:${PORT}`);
+    });
+}
+
+export default app;
